@@ -2,6 +2,9 @@
 #include <unistd.h>
 #include <string.h>
 
+#define SIDE_OUT	0
+#define SIDE_IN		1
+
 #define STDIN		0
 #define STDOUT		1
 #define STDERR		2
@@ -118,6 +121,26 @@ int list_rewind(t_list **list)
 	return (EXIT_SUCCESS);
 }
 
+int list_clear(t_list **cmds)
+{
+	t_list	*tmp;
+	int		i;
+
+	list_rewind(cmds);
+	while (*cmds)
+	{
+		tmp = (*cmds)->next;
+		i = 0;
+		while (i < (*cmds)->length)
+			free((*cmds)->args[i++]);
+		free((*cmds)->args);
+		free(*cmds);
+		*cmds = tmp;
+	}
+	*cmds = NULL;
+	return (EXIT_SUCCESS);
+}
+
 int parse_arg(t_list **cmds, char *arg)
 {
 	int	is_break;
@@ -134,6 +157,57 @@ int parse_arg(t_list **cmds, char *arg)
 	else
 		return (add_arg(*cmds, arg));		// 그 외, 예를들어 path같은 경우. add_arg로 구조체의 args 변수에 저장됨.
 	return (EXIT_SUCCESS);
+}
+
+int exec_cmd(t_list *cmd, char **env)
+{
+	pid_t	pid;
+	int		ret;
+	int		status;
+	int		pipe_open;
+
+	ret = EXIT_FAILURE;
+	pipe_open = 0;
+	if (cmd->type == TYPE_PIPE || (cmd-> previous && cmd->previous->type == TYPE_PIPE))
+	{
+		pipe_open = 1;
+		if (pipe(cmd->pipes))
+			return (exit_fatal());
+	}
+	pid = fork();
+	if (pid < 0)
+		return (exit_fatal());
+	else if (pid == 0)
+	{
+		if (cmd->type == TYPE_PIPE
+			&& dup2(cmd->pipes[SIDE_IN], STDOUT) < 0)
+			return (exit_fatal());
+		if (cmd->previous && cmd->previous->type == TYPE_PIPE
+			&& dup2(cmd->previous->pipes[SIDE_OUT], STDIN) < 0)
+			return (exit_fatal());
+		if ((ret = execve(cmd->args[0], cmd->args, env)) < 0)
+		{
+			show_error("error: cannot execute ");
+			show_error(cmd->args[0]);
+			show_error("\n");
+		}
+		exit(ret);
+	}
+	else
+	{
+		waitpid(pid, &status, 0);
+		if (pipe_open)
+		{
+			close(cmd->pipes[SIDE_IN]);
+			if (!cmd->next || cmd->type == TYPE_BREAK)
+				close(cmd->pipes[SIDE_OUT]);
+		}
+		if (cmd->previous && cmd->previous->type == TYPE_PIPE)
+			close(cmd->previous->pipes[SIDE_OUT]);
+		if (WIFEXITED(status))
+			ret = WEXITSTATUS(status);
+	}
+	return (ret);
 }
 
 int exec_cmds(t_list **cmds, char **env)
@@ -187,18 +261,6 @@ int main(int argc, char **argv, char **env)
 	}
 	if (cmds)
 		ret = exec_cmds(&cmds, env);
-	list_rewind(&cmds);
-
-	while (cmds != NULL){					// 파싱 잘 됐나 확인해보기
-		j = 0;
-		while (cmds->args[j])
-		{
-    		printf("cmds->args[%d] = %s\n", j, cmds->args[j]);
-			j++;
-		}
-		printf("cmds->type : %d\n\n", cmds->type);
-    	cmds = cmds->next;
-	}
-	
+	list_clear(&cmds);
 	return (ret);
 }
