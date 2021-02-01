@@ -77,15 +77,15 @@ int add_arg(t_list *cmd, char *arg)
 	tmp = NULL;
 	if (!(tmp = (char**)malloc(sizeof(*tmp) * (cmd->length + 2))))		//일단 tmp에 문자열 두 줄 넣을 수 있는 만큼 할당
 		return (exit_fatal());
-	while (i < cmd->length)
+	while (i < cmd->length)												//tmp 에 그 전에 있던 argument들 가져와서 넣고
 	{
 		tmp[i] = cmd->args[i];
 		i++;
 	}
-	if (cmd->length > 0)
+	if (cmd->length > 0)												// 구버전은 free해버림.
 		free(cmd->args);
 	cmd->args = tmp;													// length가 0이면 바로 여기로 와서 args[0]에 문자열 arg 저장
-	cmd->args[i++] = ft_strdup(arg);
+	cmd->args[i++] = ft_strdup(arg);									// 새로운 argument 추가
 	cmd->args[i] = 0;
 	cmd->length++;
 	return (EXIT_SUCCESS);
@@ -123,7 +123,7 @@ int parse_arg(t_list **cmds, char *arg)
 	int	is_break;
 
 	is_break = (strcmp(";", arg) == 0);		// 인자가 ";" 인지 검사
-	if (is_break && !*cmds)					// 인자가 ; 이고 cmds 가 NULL이면 return 0 (그냥 ;만 있는 경우 아무것도 안한다는 뜻)
+	if (is_break && !*cmds)					// 인자가 ; 이고 cmds 가 NULL이면 return 0 (그냥 ;로 시작하는 경우 아무것도 안하고 넘어간다)
 		return (EXIT_SUCCESS);
 	else if (!is_break && (!*cmds || (*cmds)->type > TYPE_END))		// 인자가 ";"이 아니면서 (cmds가 NULL이거나 type이 TYPE_END보다 크면)
 		return (list_push(cmds, arg));								// list_push 함수로 cmd리스트에 추가
@@ -134,6 +134,37 @@ int parse_arg(t_list **cmds, char *arg)
 	else
 		return (add_arg(*cmds, arg));		// 그 외, 예를들어 path같은 경우. add_arg로 구조체의 args 변수에 저장됨.
 	return (EXIT_SUCCESS);
+}
+
+int exec_cmds(t_list **cmds, char **env)
+{
+	t_list	*crt;							//current
+	int		ret;
+
+	ret = EXIT_SUCCESS;
+	list_rewind(cmds);
+	while (*cmds)
+	{
+		crt = *cmds;
+		if (strcmp("cd", crt->args[0]) == 0)
+		{
+			ret = EXIT_SUCCESS;
+			if (crt->length < 2)
+				ret = show_error("error: cd: bad arguments\n");
+			else if (chdir(crt->args[1]))		//chdir() 성공시 0 리턴, 실패시 -1 리턴
+			{
+				ret = show_error("error: cd: cannot change directory to ");
+				show_error(crt->args[1]);
+				show_error("\n");
+			}
+		}
+		else
+			ret = exec_cmd(crt, env);
+		if (!(*cmds)->next)						//연결리스트의 끝에 도달하면 탈출
+			break ;
+		*cmds = (*cmds)->next;
+	}
+	return (ret);
 }
 
 #include <stdio.h>
@@ -150,7 +181,12 @@ int main(int argc, char **argv, char **env)
 	cmds = NULL;
 	i = 1;
 	while (i < argc)						//argv 인자를 처음부터 끝까지 하나씩 파싱함수에 넘김
-		parse_arg(&cmds, argv[i++]);
+	{
+		parse_arg(&cmds, argv[i]);
+		i++;
+	}
+	if (cmds)
+		ret = exec_cmds(&cmds, env);
 	list_rewind(&cmds);
 
 	while (cmds != NULL){					// 파싱 잘 됐나 확인해보기
